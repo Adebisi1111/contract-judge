@@ -12,7 +12,26 @@ export interface LLMEvaluation {
 }
 
 const LLM_BASE = 'https://inference-api.nousresearch.com/v1';
-const LLM_MODEL = 'upstage/solar-pro4';
+const LLM_MODEL = 'anthropic/claude-sonnet-5.5';
+
+async function llmPost(body: object): Promise<{choices: Array<{message: {content: string}}>}> {
+  const apiKey = (typeof process !== 'undefined' && process.env?.REACT_APP_LLM_API_KEY) ||
+                  (typeof window !== 'undefined' && (window as any).__LLM_API_KEY) ||
+                  '';
+  const res = await fetch(`${LLM_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`LLM API ${res.status}: ${text.slice(0, 300)}`);
+  }
+  return res.json() as Promise<{choices: Array<{message: {content: string}}>}>;
+}
 
 /**
  * Evaluate contract code using an LLM.
@@ -41,23 +60,14 @@ ${code}
 
 Return ONLY the JSON object, no other text.`;
 
-  const response = await fetch(`${LLM_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 2048,
-      temperature: 0.3,
-    }),
+  const response = await llmPost({
+    model: LLM_MODEL,
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 2048,
+    temperature: 0.3,
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`LLM API error ${response.status}: ${text.slice(0, 200)}`);
-  }
-
-  const data = await response.json();
+  const data = response;
   const raw = data.choices[0]?.message?.content || '';
 
   // Try to parse JSON from the response
