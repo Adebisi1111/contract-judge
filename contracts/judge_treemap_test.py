@@ -1,9 +1,8 @@
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
-"""ContractJudge - GenLayer contract security auditor (OracleNetwork-style)."""
+"""ContractJudge - GenLayer contract security auditor (matches OracleNetwork TreeMap pattern)."""
 
 import json
-from datetime import datetime, timezone
 from dataclasses import dataclass
 from genlayer import *
 
@@ -24,9 +23,6 @@ class ContractJudge(gl.Contract):
     def __init__(self):
         self.submission_count = u256(0)
 
-    def _now(self) -> int:
-        return int(datetime.now(timezone.utc).timestamp())
-
     @gl.public.write
     def submit_contract(self, code: str) -> str:
         if not code or not code.strip():
@@ -35,10 +31,10 @@ class ContractJudge(gl.Contract):
         sid = str(self.submission_count)
         self.submission_count += 1
         self.submissions[sid] = Submission(
-            code=code, status="pending", result="", timestamp=u256(self._now()))
+            code=code, status="pending", result="", timestamp=gl.now())
         return sid
 
-    @gl.public.view
+    @gl.public.read
     def get_verdict(self, submission_id: str) -> dict:
         sub = self.submissions.get(submission_id, None)
         if sub is None:
@@ -53,7 +49,7 @@ class ContractJudge(gl.Contract):
             "timestamp": sub.timestamp,
         }
 
-    @gl.public.view
+    @gl.public.read
     def list_submissions(self) -> list:
         result = []
         for sid in self.submissions.keys():
@@ -61,7 +57,7 @@ class ContractJudge(gl.Contract):
             result.append({"submission_id": sid, "status": s.status, "timestamp": s.timestamp})
         return result
 
-    @gl.public.view
+    @gl.public.read
     def get_stats(self) -> dict:
         total = self.submission_count
         analyzed = sum(1 for s in self.submissions.values() if s.status == "analyzed")

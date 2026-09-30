@@ -92,35 +92,9 @@ function ResultDisplay({ result }: { result: JudgeResult | null }) {
 }
 
 const SAMPLES: Record<string, string> = {
-  valid: `from genlayer import *
-
-@allow_storage
-class SimpleStorage:
-    value: str
-
-    @gl.public.write
-    def set(self, new_value: str):
-        self.value = new_value
-
-    @gl.public.read
-    def get(self) -> str:
-        return self.value`,
-  invalid_missing_import: `class BadContract:
-    @gl.public.write
-    def set(self, x: int):
-        self.x = x`,
-  invalid_bare_except: `from genlayer import *
-
-@allow_storage
-class Risky:
-    data: str
-
-    @gl.public.write
-    def update(self, val: str):
-        try:
-            self.data = val
-        except:
-            pass`,
+  valid: `from genlayer import *\n\n@allow_storage\nclass SimpleStorage:\n    value: str\n\n    @gl.public.write\n    def set(self, new_value: str):\n        self.value = new_value\n\n    @gl.public.view\n    def get(self) -> str:\n        return self.value`,
+  invalid_missing_import: `class BadContract:\n    @gl.public.write\n    def set(self, x: int):\n        self.x = x`,
+  invalid_bare_except: `from genlayer import *\n\n@allow_storage\nclass Risky:\n    data: str\n\n    @gl.public.write\n    def update(self, val: str):\n        try:\n            self.data = val\n        except:\n            pass`,
   invalid_stub: `from genlayer import *
 
 @allow_storage
@@ -131,7 +105,7 @@ class StubContract:
     def increment(self):
         pass
 
-    @gl.public.read
+    @gl.public.view
     def get_count(self):
         ...`,
 };
