@@ -1,102 +1,88 @@
 # Contract Judge
 
-A GenLayer dApp that lets users submit Python contract code for LLM-powered security analysis.
-Validators reach consensus on the LLM's verdict — the "validator as judge" pattern.
+A GenLayer dApp where users submit Python contract code for on-chain LLM-powered security analysis. AI validators reach consensus on the verdict — the "validator as judge" pattern.
+
+## Deployed
+
+- **Network:** GenLayer Studio Net (chain 61999)
+- **Contract:** `0x19D67d618b32BF872b4D57463664D792d2E3C598`
+- **Explorer:** https://explorer-studio.genlayer.com/address/0x19D67d618b32BF872b4D57463664D792d2E3C598
 
 ## Architecture
 
 ```
-┌──────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Frontend   │────▶│  GenLayer Router │────▶│  ContractJudge  │
-│  (React+Vite) │     │  (genlayer-js)   │     │ (LLM + consensus)│
-└──────────────┘     └──────────────────┘     └─────────────────┘
-                                                        │
-                                                ▼       ▼       ▼
-                                          Validator  Validator  Validator
-                                          (LLM)      (LLM)      (LLM)
+┌──────────────┐     ┌──────────────────┐     ┌─────────────────────┐
+│   Frontend   │────▶│  GenLayer Router │────▶│   ContractJudge     │
+│  (React+Vite)│     │  (eth_sendTx)    │     │ (LLM + consensus)   │
+└──────────────┘     └──────────────────┘     └─────────────────────┘
+                              │                         │
+                      submit_contract          analyze() → run_nondet
+                      (write tx)               (write tx + LLM)
+                                                     │
+                                              get_verdict()
+                                              (read call)
 ```
 
-**Frontend** (`src/`): React + Vite + Tailwind. Submits contract code to the judge contract
-and displays the LLM's analysis with severity breakdown and consensus info.
+## On-Chain Flow
 
-**Smart Contract** (`contracts/judge_contract.py`): GenLayer contract that accepts submitted
-Python code, runs it through `gl.nondet.exec_prompt` for LLM analysis, and stores the verdict.
-Validators independently execute the LLM call and reach consensus on the result.
+1. **Connect Wallet** — app auto-switches to Studio Net (61999)
+2. **submit_contract(code)** — write tx stores the code, returns submission ID
+3. **analyze(submission_id)** — write tx triggers `gl.vm.run_nondet` with leader/validator LLM consensus
+4. **get_verdict(submission_id)** — read call returns severity, issues, strengths, recommendation
 
-**LLM Evaluation** (`src/llm.ts`): Frontend-side LLM evaluation via the inference API.
-Runs multiple rounds and checks consensus (agree/partial/disagree) before presenting results.
+## Contract API
 
-## Quick Start
+| Method | Type | Description |
+|---|---|---|
+| `submit_contract(code)` | write | Submit contract code. Returns submission ID. |
+| `analyze(submission_id)` | write | Run LLM analysis with validator consensus. Returns severity. |
+| `get_verdict(submission_id)` | view | Read stored verdict: severity, issues, strengths, recommendation. |
+| `list_submissions()` | view | List all submission IDs and statuses. |
+| `get_stats()` | view | Usage statistics. |
 
-```bash
-cd contract-judge
+## LLM Consensus
 
-# Start the frontend dev server
-npm run dev
+The `analyze()` method runs `gl.vm.run_nondet` with a leader/validator pattern:
+- Leader calls `gl.nondet.exec_prompt` with the contract code and a structured JSON prompt
+- Each validator independently runs the same LLM analysis
+- Majority agreement on `severity` is required for the verdict to be committed
 
-# Open http://localhost:5173
-```
-
-## Usage
-
-1. **Paste contract code** into the editor, or load a sample
-2. **Check "LLM Consensus"** to run multi-round LLM analysis (optional, slower)
-3. Click **"Judge Contract"**
-4. View the results:
-   - Static analysis issues (always shown)
-   - LLM consensus panel (if enabled): consensus level, recommendation, LLM issues/strengths
-
-## Sample Contracts
-
-| Sample | Description |
-|---|---|
-| Valid | Clean, well-formed GenLayer contract |
-| No import | Missing `from genlayer import` |
-| Bare except | Uses bare `except:` clause |
-| Stub | Methods with only `pass`/`...` |
-
-## Judge Contract
-
-The `ContractJudge` smart contract provides:
-
-| Method | Description |
-|---|---|
-| `submit_contract(code)` | Submit contract code for analysis. Returns submission ID. |
-| `analyze(submission_id)` | Run LLM analysis. Validators consensus on the result. |
-| `get_verdict(submission_id)` | Read the stored verdict and full submission record. |
-| `list_submissions()` | List all submission IDs and statuses. |
-| `get_stats()` | Usage statistics (total, analyzed, pending). |
-
-The LLM prompt analyzes for: missing imports, wrong decorators, storage issues, reentrancy,
-error handling, type safety, logic bugs, non-determinism risks, and prompt injection risks.
+The LLM checks for: missing imports, missing @allow_storage, wrong decorators, missing return types, bare excepts, stub methods, mutable defaults, prompt injection risks, collection storage fields, @staticmethod, and local imports.
 
 ## Tech Stack
 
+- **Contract:** Python GenLayer Intelligent Contract (GenVM runner `1jb45aa8...`)
+- **Consensus:** `gl.vm.run_nondet` leader/validator pattern
+- **AI:** `gl.nondet.exec_prompt` for on-chain LLM analysis
 - **Frontend:** React 19, Vite 6, Tailwind CSS 4, TypeScript
-- **Blockchain:** GenLayer Studio Net, genlayer-js SDK, viem
-- **LLM:** Inference API (Claude Sonnet) for multi-round consensus evaluation
-- **Build:** npm, TypeScript strict mode
+- **Write Tx:** Direct `eth_sendTransaction` with GenLayer ULEB128 calldata encoding
+- **Read Tx:** `gen_call` JSON-RPC
 
 ## Project Structure
 
 ```
 contract-judge/
 ├── contracts/
-│   └── judge_contract.py      # GenLayer judge contract
+│   └── judge_contract.py    # On-chain judge contract
 ├── src/
-│   ├── App.tsx                # Main React UI
-│   ├── judge.ts               # Static analysis + judge orchestration
-│   ├── llm.ts                 # LLM evaluation + consensus
-│   ├── genlayer-api.ts         # GenLayer RPC client
-│   ├── main.tsx               # Entry point
-│   ├── index.css              # Tailwind + custom styles
-│   └── vite-env.d.ts          # Vite type declarations
-├── index.html                 # HTML entry
-├── vite.config.ts             # Vite config (React + Tailwind plugins)
-├── tsconfig.json              # TypeScript config (strict)
-├── package.json               # Dependencies
-└── README.md                  # This file
+│   ├── App.tsx              # Main React UI (wallet connect + on-chain judge)
+│   ├── judge.ts             # On-chain judge orchestration + static preview
+│   ├── genlayer-api.ts      # GenLayer RPC client (read + write)
+│   ├── main.tsx             # Entry point
+│   ├── index.css            # Tailwind styles
+│   └── vite-env.d.ts        # Vite types
+├── index.html               # HTML entry
+├── vite.config.ts           # Vite config
+├── tsconfig.json            # TypeScript config
+└── package.json             # Dependencies
 ```
+
+## Verified On-Chain
+
+- `submit_contract` with a valid contract → accepted, submission ID "0"
+- `analyze("0")` → MAJORITY_AGREE consensus, verdict stored
+- `get_verdict("0")` → severity "none", 11 strengths listed, recommended true
+- Full lifecycle verified on Studio Net
 
 ## License
 
