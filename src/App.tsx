@@ -64,7 +64,7 @@ function ResultDisplay({ result }: { result: JudgeResult | null }) {
       {result.issues.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">Issues ({result.issues.length})</h3>
-          <div className="space-y-1">{result.issues.map((issue, i) => <IssueChip key={i} issue={issue})}</div>
+          <div className="space-y-1">{result.issues.map((issue, i) => <IssueChip key={i} issue={issue} />)}</div>
         </div>
       )}
       {result.onChain && result.onChain.strengths.length > 0 && (
@@ -191,7 +191,7 @@ export function App() {
             {staticPreview.length === 0 ? (
               <p className="text-sm text-gray-500">No obvious static issues.</p>
             ) : (
-              <div className="space-y-1">{staticPreview.map((issue, i) => <IssueChip key={i} issue={issue})}</div>
+              <div className="space-y-1">{staticPreview.map((issue, i) => <IssueChip key={i} issue={issue} />)}</div>
             )}
           </div>
         )}
