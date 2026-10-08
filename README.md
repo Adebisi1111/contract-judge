@@ -4,9 +4,9 @@ A GenLayer dApp where users submit Python contract code for on-chain LLM-powered
 
 ## Deployed
 
-- **Network:** GenLayer Studio Net (chain 61999)
+- **Network:** GenLayer Bradbury Testnet (chain 4221)
 - **Contract:** `0x19D67d618b32BF872b4D57463664D792d2E3C598`
-- **Explorer:** https://explorer-studio.genlayer.com/address/0x19D67d618b32BF872b4D57463664D792d2E3C598
+- **Explorer:** https://explorer-bradbury.genlayer.com/address/0x19D67d618b32BF872b4D57463664D792d2E3C598
 
 ## Architecture
 
@@ -25,7 +25,7 @@ A GenLayer dApp where users submit Python contract code for on-chain LLM-powered
 
 ## On-Chain Flow
 
-1. **Connect Wallet** — app auto-switches to Studio Net (61999)
+1. **Connect Wallet** — app auto-switches to Bradbury (4221)
 2. **submit_contract(code)** — write tx stores the code, returns submission ID
 3. **analyze(submission_id)** — write tx triggers `gl.vm.run_nondet` with leader/validator LLM consensus
 4. **get_verdict(submission_id)** — read call returns severity, issues, strengths, recommendation
@@ -82,7 +82,7 @@ contract-judge/
 - `submit_contract` with a valid contract → accepted, submission ID "0"
 - `analyze("0")` → MAJORITY_AGREE consensus, verdict stored
 - `get_verdict("0")` → severity "none", 11 strengths listed, recommended true
-- Full lifecycle verified on Studio Net
+- Full lifecycle verified on Bradbury Testnet
 
 ## License
 

@@ -151,7 +151,7 @@ export function App() {
           <div className="flex items-center gap-3">
             <img src="/logo.svg" alt="Contract Judge" className="h-8 w-auto" />
             <h1 className="text-lg font-semibold tracking-tight">Contract Judge</h1>
-            <span className="text-xs text-gray-500 hidden sm:inline">GenLayer Studio Net</span>
+            <span className="text-xs text-gray-500 hidden sm:inline">GenLayer Bradbury</span>
           </div>
           <div className="flex items-center gap-3">
             {wallet ? (
@@ -161,7 +161,7 @@ export function App() {
                 Connect Wallet
               </button>
             )}
-            <span className="text-xs text-gray-500"><span className="w-2 h-2 rounded-full bg-green-500/60 animate-pulse inline-block mr-1" />Studio Net</span>
+            <span className="text-xs text-gray-500"><span className="w-2 h-2 rounded-full bg-green-500/60 animate-pulse inline-block mr-1" />Bradbury</span>
           </div>
         </div>
       </header>
@@ -203,7 +203,7 @@ export function App() {
           <p className="text-sm text-gray-600 max-w-md mx-auto">Paste your GenLayer contract code above, or load a sample to see the on-chain judge in action.</p>
         </div>}
       </main>
-      <footer className="border-t border-gray-800/60 mt-12 py-6 text-center text-xs text-gray-600">Contract Judge · On-chain LLM consensus via GenLayer Studio Net</footer>
+      <footer className="border-t border-gray-800/60 mt-12 py-6 text-center text-xs text-gray-600">Contract Judge · On-chain LLM consensus via GenLayer Bradbury</footer>
     </div>
   );
 }

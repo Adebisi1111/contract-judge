@@ -1,7 +1,7 @@
-// GenLayer Studio Net — RPC client with write support
-// Uses direct JSON-RPC for reads and eth_sendTransaction for writes.
+// GenLayer Bradbury Testnet — RPC client with write support
+// Uses direct JSON-RPC for reads and wallet eth_sendTransaction for writes.
 
-const GENLAYER_RPC = 'https://studio.genlayer.com/api';
+const GENLAYER_RPC = 'https://rpc-bradbury.genlayer.com';
 
 export interface GenLayerChain {
   id: number;
@@ -12,11 +12,11 @@ export interface GenLayerChain {
 }
 
 export const GENLAYER_CHAIN: GenLayerChain = {
-  id: 61999,
-  name: 'GenLayer Studio Net',
+  id: 4221,
+  name: 'GenLayer Bradbury Testnet',
   nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
   rpcUrls: { default: { http: [GENLAYER_RPC], webSocket: [] } },
-  blockExplorers: { default: { name: 'GenLayer Explorer', url: 'https://explorer-studio.genlayer.com' } },
+  blockExplorers: { default: { name: 'Bradbury Explorer', url: 'https://explorer-bradbury.genlayer.com' } },
 };
 
 /**
@@ -158,7 +158,7 @@ export async function waitForReceipt(
 }
 
 /**
- * Connect wallet and switch to GenLayer Studio Net.
+ * Connect wallet and switch to GenLayer Bradbury Testnet.
  */
 export async function connectWallet(): Promise<string> {
   if (!window.ethereum) throw new Error('No wallet found');
@@ -166,17 +166,17 @@ export async function connectWallet(): Promise<string> {
   try {
     await window.ethereum.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: '0xf297' }], // 61999
+      params: [{ chainId: '0x107d' }], // 4221
     });
   } catch {
     await window.ethereum.request({
       method: 'wallet_addEthereumChain',
       params: [{
-        chainId: '0xf297',
-        chainName: 'GenLayer Studio Net',
+        chainId: '0x107d',
+        chainName: 'GenLayer Bradbury Testnet',
         nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
         rpcUrls: [GENLAYER_RPC],
-        blockExplorerUrls: ['https://explorer-studio.genlayer.com'],
+        blockExplorerUrls: ['https://explorer-bradbury.genlayer.com'],
       }],
     });
   }
