@@ -110,7 +110,7 @@ export function encodeCalldata(method: string, args: (string | null | undefined)
 
 /**
  * Send a write transaction via the connected wallet.
- * Uses eth_sendTransaction with GenLayer calldata encoding.
+ * Uses wallet's eth_sendTransaction (MetaMask signs locally, then sends).
  */
 export async function sendWriteTx(
   wallet: string,
@@ -119,11 +119,17 @@ export async function sendWriteTx(
   args: (string | null | undefined)[],
 ): Promise<string> {
   const data = encodeCalldata(method, args);
-  const hash = await rpcCall('eth_sendTransaction', [{
-    from: wallet,
-    to: contractAddress,
-    data,
-  }]);
+
+  if (!window.ethereum) throw new Error('No wallet found');
+
+  const hash = await window.ethereum.request({
+    method: 'eth_sendTransaction',
+    params: [{
+      from: wallet,
+      to: contractAddress,
+      data,
+    }],
+  });
   return hash as string;
 }
 
