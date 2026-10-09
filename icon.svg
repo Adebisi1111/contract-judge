@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background -->
+  <rect width="32" height="32" rx="6" fill="#0f172a"/>
+  
+  <!-- Code brackets -->
+  <text x="6" y="23" font-family="monospace" font-size="18" font-weight="bold" fill="#38bdf8">{</text>
+  <text x="22" y="23" font-family="monospace" font-size="18" font-weight="bold" fill="#38bdf8">}</text>
+  
+  <!-- Gavel -->
+  <rect x="12" y="11" width="8" height="3" rx="1" fill="#fbbf24"/>
+  <rect x="13" y="8" width="6" height="3" rx="0.5" fill="#fbbf24"/>
+  <rect x="10" y="14" width="12" height="2" rx="1" fill="#f59e0b"/>
+</svg>
