@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { runJudge, analyzeStatic, JudgeResult, JudgeIssue } from './judge';
 import { connectWallet } from './genlayer-api';
 
-const CONTRACT_ADDRESS = '0x19D67d618b32BF872b4D57463664D792d2E3C598';
+const CONTRACT_ADDRESS = '0x144d4d36C5fE65a834871EE9C2900866157B5A78';
 
 const severityColors: Record<JudgeIssue['severity'], string> = {
   critical: 'bg-red-600/20 text-red-400 border-red-600/40',
@@ -122,10 +122,6 @@ export function App() {
   const handleJudge = useCallback(async () => {
     if (!code.trim()) { setError('Please enter contract code.'); return; }
     if (!wallet) { setError('Connect wallet first.'); return; }
-    if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
-      setError('Contract address not configured. Deploy the contract first.');
-      return;
-    }
     setRunning(true);
     setError(null);
     setResult(null);

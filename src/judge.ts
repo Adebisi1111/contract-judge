@@ -1,10 +1,9 @@
-import { genCall, sendWriteTx, waitForReceipt } from './genlayer-api';
+import { getClient, BRADBURY_FEE } from './genlayer-api';
 
 export interface JudgeResult {
   status: 'pass' | 'fail' | 'error';
   issues: JudgeIssue[];
   verdict: string;
-  /** On-chain submission info */
   onChain?: {
     submissionId: string;
     txHash: string;
@@ -13,9 +12,8 @@ export interface JudgeResult {
     strengths: string[];
     recommended: boolean;
     analyzer: string;
+    explorerUrl: string;
   };
-  /** Local static analysis (fallback / preview) */
-  staticIssues?: JudgeIssue[];
 }
 
 export interface JudgeIssue {
@@ -25,9 +23,19 @@ export interface JudgeIssue {
   line?: number;
 }
 
+const EXPLORER = 'https://explorer-bradbury.genlayer.com';
+
+/** Extract a consensus result name from a receipt (SDK puts it top-level). */
+function receiptResult(r: any): string {
+  return r?.resultName || r?.consensusData?.resultName || '';
+}
+
 /**
- * On-chain judge: submits code to the ContractJudge contract and waits for
- * the LLM consensus verdict.
+ * On-chain judge. Submits code to the ContractJudge contract, runs the LLM
+ * consensus analysis, and reads the decoded verdict — all via genlayer-js.
+ *
+ * analyze is a non-deterministic LLM consensus round; it retries a few times
+ * because any single round can return NO_MAJORITY / TIMEOUT before agreeing.
  */
 export async function runJudge(
   contractCode: string,
@@ -38,99 +46,106 @@ export async function runJudge(
   if (!contractAddress) throw new Error('Contract address required');
   if (!contractCode.trim()) throw new Error('Contract code is empty');
 
-  // Step 1: submit_contract (write tx)
-  const submitTx = await sendWriteTx(wallet, contractAddress, 'submit_contract', [contractCode]);
-  await waitForReceipt(submitTx);
+  const client = getClient(wallet as `0x${string}`) as any;
+  const fees = { feeValue: BRADBURY_FEE };
 
-  // Step 2: read submission_id from contract state
-  const total = await genCall(contractAddress, 'get_stats', []) as { total_submissions: number };
-  const submissionId = String(total.total_submissions - 1);
+  // 1) submit_contract (write)
+  const submitHash = await client.writeContract({
+    address: contractAddress,
+    functionName: 'submit_contract',
+    args: [contractCode],
+    value: 0n,
+    fees,
+  });
+  await client.waitForTransactionReceipt({ hash: submitHash, waitUntil: 'finalized', retries: 240 });
 
-  // Step 3: analyze (write tx — triggers LLM consensus)
-  const analyzeTx = await sendWriteTx(wallet, contractAddress, 'analyze', [submissionId]);
-  await waitForReceipt(analyzeTx, 300000); // 5 min — LLM consensus takes time
+  // 2) read the submission id from decoded contract state
+  const stats = await client.readContract({
+    address: contractAddress, functionName: 'get_stats', args: [],
+  });
+  const total = Number(stats.total_submissions ?? stats[0] ?? 0);
+  const submissionId = String(total - 1);
 
-  // Step 4: get_verdict (read)
-  const verdictData = await genCall(contractAddress, 'get_verdict', [submissionId]) as {
-    exists: boolean;
-    result?: {
-      severity: string;
-      issues: string[];
-      strengths: string[];
-      recommended: boolean;
-      analyzed_at: number;
-      analyzer: string;
-    };
-  };
-
-  if (!verdictData.exists || !verdictData.result) {
-    throw new Error('Verdict not found — consensus may have failed');
+  // 3) analyze (write — triggers LLM consensus), retry on non-committing rounds
+  let analyzeHash = '';
+  let agreed = false;
+  for (let attempt = 1; attempt <= 5 && !agreed; attempt++) {
+    const h = await client.writeContract({
+      address: contractAddress,
+      functionName: 'analyze',
+      args: [submissionId],
+      value: 0n,
+      fees,
+    });
+    analyzeHash = h;
+    const r = await client.waitForTransactionReceipt({ hash: h, waitUntil: 'finalized', retries: 240 });
+    if (receiptResult(r) === 'AGREE') agreed = true;
+    if (!agreed) await new Promise(res => setTimeout(res, 6000));
+  }
+  if (!agreed) {
+    throw new Error(
+      'AI consensus did not reach agreement after several attempts. ' +
+      'This is normal for a non-deterministic LLM round — please try again.'
+    );
   }
 
-  const r = verdictData.result;
-  const hasCritical = r.severity === 'critical';
-  const hasHigh = r.severity === 'high';
+  // 4) get_verdict (decoded read), polling briefly for read lag
+  let verdict: any = null;
+  for (let i = 0; i < 20; i++) {
+    verdict = await client.readContract({
+      address: contractAddress, functionName: 'get_verdict', args: [submissionId],
+    });
+    if (verdict && verdict.exists && verdict.result) break;
+    await new Promise(res => setTimeout(res, 4000));
+  }
+  if (!verdict || !verdict.exists || !verdict.result) {
+    throw new Error('Verdict not found after consensus — please retry.');
+  }
+
+  const r = verdict.result;
+  const severity = (r.severity || 'none').toLowerCase();
+  const blocking = severity === 'critical' || severity === 'high';
 
   return {
-    status: hasCritical || hasHigh ? 'fail' : 'pass',
-    issues: r.issues.map(msg => ({ severity: r.severity as JudgeIssue['severity'], category: 'onchain', message: msg })),
-    verdict: hasCritical
-      ? 'Critical issues found — contract will likely fail on-chain.'
-      : hasHigh
-        ? 'High-severity issues found — review before deploying.'
-        : r.severity === 'medium'
-          ? 'Medium issues found — should be improved.'
-          : 'No issues found. Contract appears well-formed.',
+    status: blocking ? 'fail' : 'pass',
+    issues: (r.issues || []).map((msg: string) => ({
+      severity: (['critical', 'high', 'medium', 'low'].includes(severity) ? severity : 'info') as JudgeIssue['severity'],
+      category: 'on-chain',
+      message: msg,
+    })),
+    verdict: blocking
+      ? `${severity === 'critical' ? 'Critical' : 'High'}-severity issues found — review before deploying.`
+      : 'No blocking issues. Contract appears well-formed.',
     onChain: {
       submissionId,
-      txHash: analyzeTx,
+      txHash: analyzeHash,
       severity: r.severity,
-      issues: r.issues,
-      strengths: r.strengths,
+      issues: r.issues || [],
+      strengths: r.strengths || [],
       recommended: r.recommended,
-      analyzer: r.analyzer,
+      analyzer: r.analyzer || '',
+      explorerUrl: `${EXPLORER}/address/${contractAddress}`,
     },
   };
 }
 
 /**
- * Local static analysis — used as a quick preview before submitting on-chain.
+ * Local static preview shown BEFORE submitting on-chain. This is NOT the
+ * verdict — the authoritative verdict comes from on-chain LLM consensus.
  */
 export function analyzeStatic(code: string): JudgeIssue[] {
   const issues: JudgeIssue[] = [];
-
   if (!code.includes('from genlayer import')) {
-    issues.push({ severity: 'critical', category: 'imports', message: 'Missing "from genlayer import" — contract cannot use GenLayer SDK.' });
+    issues.push({ severity: 'critical', category: 'imports', message: 'Missing "from genlayer import".' });
   }
-
   if (!code.includes('@allow_storage') && !code.includes('@gl.allow_storage')) {
     issues.push({ severity: 'high', category: 'decorators', message: 'No @allow_storage decorator found.' });
   }
-
   if (code.includes('except:') || code.includes('except :')) {
-    issues.push({ severity: 'high', category: 'error-handling', message: 'Bare "except:" clause catches all exceptions.' });
+    issues.push({ severity: 'high', category: 'error-handling', message: 'Bare "except:" clause.' });
   }
-
   if (code.includes('@staticmethod')) {
-    issues.push({ severity: 'critical', category: 'genvm', message: '@staticmethod is rejected by GenVM. Use module-level functions instead.' });
+    issues.push({ severity: 'critical', category: 'genvm', message: '@staticmethod is rejected by GenVM.' });
   }
-
-  if (/import\s+re\b/.test(code) && !/^import re/m.test(code)) {
-    issues.push({ severity: 'critical', category: 'genvm', message: 'Local import re — GenVM rejects local imports. Move to top of file.' });
-  }
-
-  if (/:\s*DynArray\[/.test(code) || /:\s*list\[/.test(code)) {
-    issues.push({ severity: 'high', category: 'genvm', message: 'Collection type as storage field — GenVM rejects this. Use str and join/split on read.' });
-  }
-
-  const mutableDefaultPattern = /def\s+\w+\s*\(.*=\s*\[\s*\]|=\s*\{\s*\}/;
-  if (mutableDefaultPattern.test(code)) {
-    issues.push({ severity: 'medium', category: 'best-practices', message: 'Mutable default argument detected.' });
-  }
-
-  if (code.includes('gl.nondet.exec_prompt') && code.includes('self.')) {
-    issues.push({ severity: 'medium', category: 'security', message: 'exec_prompt with stored/self values — ensure user input is sanitized.' });
-  }
-
   return issues;
 }
