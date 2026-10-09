@@ -30,34 +30,52 @@ class Submission:
 # ---------------------------------------------------------------------------
 
 def _analyze_code(code: str) -> dict:
-    """Run LLM security analysis on submitted contract code."""
+    """Run LLM security analysis on submitted contract code.
+
+    Kept deliberately small: the leader's nondet round must complete inside the
+    block execution window, so the prompt is terse and the input is capped.
+    """
     prompt = (
-        "You are a GenLayer contract security auditor. Analyze the following "
-        "Python GenLayer contract code for issues.\n\n"
-        f"CONTRACT CODE:\n{code[:5000]}\n\n"
-        "Check for:\n"
-        "- Missing 'from genlayer import' statement\n"
-        "- Missing @allow_storage or @gl.allow_storage decorator\n"
-        "- Wrong decorator names (@public.read vs @gl.public.view, etc.)\n"
-        "- Missing return type annotations on @gl.public.view methods\n"
-        "- Bare except: clauses\n"
-        "- Stub methods (only pass or ...)\n"
-        "- Mutable default arguments\n"
-        "- gl.nondet.exec_prompt called with unsanitized user input (prompt injection)\n"
-        "- Collection types as storage dataclass fields (rejected by GenVM)\n"
-        "- bigint assigned plain values instead of u256\n"
-        "- @staticmethod or local imports (rejected by GenVM)\n\n"
-        "Respond with ONLY a valid JSON object in this exact format:\n"
-        '{"severity": "critical|high|medium|low|none", "issues": ["..."], "strengths": ["..."], "recommended": true|false}\n\n'
-        "Rules:\n"
-        "- severity: 'critical' if missing imports or missing @allow_storage; 'high' if bare except or wrong decorators; 'medium' for other issues; 'none' if clean\n"
-        "- issues: list of specific problem descriptions\n"
-        "- strengths: list of things done correctly\n"
-        "- recommended: false if critical or high issues found\n"
-        "- Do NOT include any text outside the JSON object"
+        "Audit this GenLayer Python contract. Reply with ONLY a JSON object.\n"
+        f"CODE:\n{code[:2000]}\n\n"
+        'Format: {"severity":"critical|high|medium|low|none","issues":[".."],'
+        '"strengths":[".."],"recommended":true|false}\n'
+        "critical=missing 'from genlayer import' or @allow_storage; "
+        "high=bare except / @staticmethod / local import; none=clean. "
+        "recommended=false if critical or high."
     )
-    raw = gl.nondet.exec_prompt(prompt).strip()
-    return _parse_verdict_json(raw)
+    # exec_prompt with response_format="json" returns a parsed dict, not a
+    # string — do not call string methods on it.
+    res = gl.nondet.exec_prompt(prompt, response_format="json")
+    if isinstance(res, str):
+        res = _parse_verdict_json(res)
+    if not isinstance(res, dict):
+        res = {"severity": "none", "issues": ["analysis unavailable"], "strengths": [], "recommended": False}
+    return {
+        "severity": res.get("severity", "none"),
+        "issues": _as_str_list(res.get("issues", [])),
+        "strengths": _as_str_list(res.get("strengths", [])),
+        "recommended": bool(res.get("recommended", True)),
+    }
+
+
+def _as_str_list(value) -> list:
+    """Normalize a field that may be a list, a single string, or absent into a
+    list of non-empty strings. Guards against the model returning issues as a
+    bare string, which otherwise gets stored as one unparsed blob."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, (list, tuple)):
+        out = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                out.append(item)
+            elif item is not None:
+                out.append(str(item))
+        return out
+    return [str(value)]
 
 
 def _parse_verdict_json(raw: str) -> dict:
@@ -75,12 +93,30 @@ def _parse_verdict_json(raw: str) -> dict:
                 severity = "none"
             return {
                 "severity": severity,
-                "issues": data.get("issues", []),
-                "strengths": data.get("strengths", []),
-                "recommended": data.get("recommended", True),
+                "issues": _as_str_list(data.get("issues", [])),
+                "strengths": _as_str_list(data.get("strengths", [])),
+                "recommended": bool(data.get("recommended", True)),
             }
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, ValueError):
         pass
+    # The model sometimes wraps the JSON object inside a string field, or returns
+    # the object nested under a single key. Try one more extraction pass.
+    nested = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if nested and nested.group() != raw:
+        try:
+            data = json.loads(nested.group())
+            if isinstance(data, dict) and "severity" in data:
+                severity = data.get("severity", "none")
+                if severity not in ("critical", "high", "medium", "low", "none"):
+                    severity = "none"
+                return {
+                    "severity": severity,
+                    "issues": _as_str_list(data.get("issues", [])),
+                    "strengths": _as_str_list(data.get("strengths", [])),
+                    "recommended": bool(data.get("recommended", True)),
+                }
+        except (json.JSONDecodeError, KeyError, ValueError):
+            pass
     raw_upper = raw.upper()
     for v in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"):
         if v in raw_upper:
@@ -131,27 +167,36 @@ class ContractJudge(gl.Contract):
 
         code = sub.code
 
-        # ---- nondeterministic round (leader/validator) -------------------
+        # ---- nondeterministic round ----------------------------------------
+        # Uses gl.eq_principle.prompt_comparative, the primitive that reaches
+        # consensus reliably on Bradbury (the synchronous run_nondet +
+        # exec_prompt combination consistently hit LEADER_TIMEOUT here).
+        # prompt_comparative: the leader produces the analysis; validators
+        # judge whether it is an equivalent verdict. The comparison principle
+        # is about the coarse verdict bucket, so two runs that agree the
+        # contract is "blocking" vs "ok" reach consensus even if they pick
+        # different exact labels — exact-label matching forked the round.
         def leader_fn() -> dict:
             return _analyze_code(code)
 
-        def validator_fn(leader_res) -> bool:
-            if not isinstance(leader_res, gl.vm.Return):
-                return False
-            mine = _analyze_code(code)
-            return mine.get("severity") == leader_res.calldata.get("severity")
+        principle = (
+            "Two analyses are equivalent if they place the contract in the same "
+            "verdict bucket: 'blocking' (severity critical or high) or 'ok' "
+            "(medium, low, or none). They may differ on exact wording or on "
+            "critical-vs-high and still agree. Disagree only if one says the "
+            "contract is blocking and the other says it is fine."
+        )
 
-        result = gl.vm.run_nondet(leader_fn, validator_fn)
+        result_data = gl.eq_principle.prompt_comparative(leader_fn, principle)
+        if not isinstance(result_data, dict):
+            result_data = {"severity": "none", "issues": ["analysis unavailable"], "strengths": [], "recommended": False}
 
-        # run_nondet returns gl.vm.Return; access .calldata for the dict
-        result_data = result.calldata if hasattr(result, "calldata") else result
         severity = result_data.get("severity", "none")
-        issues = result_data.get("issues", [])
-        strengths = result_data.get("strengths", [])
-        recommended = result_data.get("recommended", True)
-
         if severity not in ("critical", "high", "medium", "low", "none"):
             severity = "none"
+        issues = _as_str_list(result_data.get("issues", []))
+        strengths = _as_str_list(result_data.get("strengths", []))
+        recommended = bool(result_data.get("recommended", True))
 
         verdict = {
             "submission_id": submission_id,

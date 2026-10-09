@@ -1,5 +1,7 @@
 {
-  "judge_address": "0x4a75EdfcA074ab8883fa062fC69aAA1a3FA1BCcA",
-  "minimal_address": "0xCa9532B09e08A173100057327CE6f4dD8526427f",
-  "deployed_at": "2026-09-30T09:22:38Z"
+  "judge_address": "0x144d4d36C5fE65a834871EE9C2900866157B5A78",
+  "network": "testnet-bradbury",
+  "chain_id": 4221,
+  "deployed_at": "2026-10-09T12:32:41.917Z",
+  "deployer": "0x61fd0047595A30A067f1F21F3b28C4AE8A8e3Dc3"
 }
