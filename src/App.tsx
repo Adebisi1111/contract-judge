@@ -108,6 +108,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [wallet, setWallet] = useState<string | null>(null);
   const [staticPreview, setStaticPreview] = useState<JudgeIssue[] | null>(null);
+  const [progressText, setProgressText] = useState<string | null>(null);
 
   const handleConnect = useCallback(async () => {
     try {
@@ -125,16 +126,21 @@ export function App() {
     setRunning(true);
     setError(null);
     setResult(null);
+    setProgressText(null);
     try {
       // Quick static preview while on-chain tx is submitted
       const preview = analyzeStatic(code);
       setStaticPreview(preview);
-      const res = await runJudge(code, wallet, CONTRACT_ADDRESS);
+      const res = await runJudge(code, wallet, CONTRACT_ADDRESS, (_phase, detail) => {
+        setProgressText(detail);
+      });
       setResult(res);
       setStaticPreview(null);
+      setProgressText(null);
     } catch (err: any) {
       setError(err.message || String(err));
       setResult(null);
+      setProgressText(null);
     } finally {
       setRunning(false);
     }
@@ -178,6 +184,12 @@ export function App() {
                 {running ? <><span className="w-4 h-4 border-2 border-gray-500/60 border-t-gray-300 rounded-full animate-spin" />Judging on-chain...</> : <>⚖️ Judge Contract</>}
               </button>
             </div>
+            {running && progressText && (
+              <div className="mt-2 text-xs text-gray-400 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500/80 animate-pulse" />
+                {progressText}
+              </div>
+            )}
           </div>
         </div>
         {error && <div className="mb-4 px-4 py-3 rounded-xl bg-red-900/20 border border-red-700/40 text-red-400 text-sm">{error}</div>}

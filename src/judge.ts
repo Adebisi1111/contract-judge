@@ -25,22 +25,45 @@ export interface JudgeIssue {
 
 const EXPLORER = 'https://explorer-bradbury.genlayer.com';
 
+/** Progress callback: lets the UI show what's happening instead of a dead spinner. */
+export type JudgeProgress = (
+  phase: 'submitting' | 'analyzing' | 'finalizing',
+  detail: string,
+) => void;
+
+const ANALYZE_ROUNDS = 12;          // ride out a slow-consensus window
+const VERDICT_POLLS = 45;           // ~3 min of background recovery polling
+const VERDICT_POLL_MS = 4000;
+
 /** Extract a consensus result name from a receipt (SDK puts it top-level). */
 function receiptResult(r: any): string {
   return r?.resultName || r?.consensusData?.resultName || '';
+}
+
+/** Read the decoded verdict for a submission id, or null if not yet committed. */
+async function readVerdict(client: any, contractAddress: string, submissionId: string) {
+  const verdict = await client.readContract({
+    address: contractAddress, functionName: 'get_verdict', args: [submissionId],
+  });
+  if (verdict && verdict.exists && verdict.result) return verdict;
+  return null;
 }
 
 /**
  * On-chain judge. Submits code to the ContractJudge contract, runs the LLM
  * consensus analysis, and reads the decoded verdict — all via genlayer-js.
  *
- * analyze is a non-deterministic LLM consensus round; it retries a few times
- * because any single round can return NO_MAJORITY / TIMEOUT before agreeing.
+ * `analyze` is a non-deterministic LLM consensus round: any single attempt can
+ * return NO_MAJORITY / TIMEOUT before one reaches AGREE. We therefore (a) retry
+ * generously, and (b) keep polling get_verdict afterward so a verdict that
+ * commits slightly after we stop driving it is still surfaced — the submission
+ * is never orphaned.
  */
 export async function runJudge(
   contractCode: string,
   wallet: string,
   contractAddress: string,
+  onProgress?: JudgeProgress,
 ): Promise<JudgeResult> {
   if (!wallet) throw new Error('Connect wallet first');
   if (!contractAddress) throw new Error('Contract address required');
@@ -52,6 +75,7 @@ export async function runJudge(
   const fees = { feeValue: BRADBURY_FEE };
 
   // 1) submit_contract (write)
+  onProgress?.('submitting', 'Submitting contract on-chain…');
   const submitHash = await client.writeContract({
     address: contractAddress,
     functionName: 'submit_contract',
@@ -71,9 +95,10 @@ export async function runJudge(
   // 3) analyze (write — triggers LLM consensus), retry on non-committing rounds
   let analyzeHash = '';
   let agreed = false;
-  for (let attempt = 1; attempt <= 5 && !agreed; attempt++) {
+  for (let attempt = 1; attempt <= ANALYZE_ROUNDS && !agreed; attempt++) {
+    onProgress?.('analyzing', `AI validators reaching consensus — round ${attempt} of ${ANALYZE_ROUNDS}…`);
     const h = await client.writeContract({
-        address: contractAddress,
+      address: contractAddress,
       functionName: 'analyze',
       args: [submissionId],
       value: 0n,
@@ -81,27 +106,29 @@ export async function runJudge(
     });
     analyzeHash = h;
     const r = await client.waitForTransactionReceipt({ hash: h, waitUntil: 'finalized', retries: 240 });
-    if (receiptResult(r) === 'AGREE') agreed = true;
-    if (!agreed) await new Promise(res => setTimeout(res, 6000));
-  }
-  if (!agreed) {
-    throw new Error(
-      'AI consensus did not reach agreement after several attempts. ' +
-      'This is normal for a non-deterministic LLM round — please try again.'
-    );
+    if (receiptResult(r) === 'AGREE') {
+      agreed = true;
+    } else if (attempt < ANALYZE_ROUNDS) {
+      await new Promise(res => setTimeout(res, 5000));
+    }
   }
 
-  // 4) get_verdict (decoded read), polling briefly for read lag
+  // 4) get_verdict (decoded read). Even if our own rounds didn't agree, a verdict
+  //    may still commit — poll it so a late consensus is surfaced, never orphaned.
+  onProgress?.('finalizing', agreed ? 'Reading verdict…' : 'Consensus is slow — waiting for the verdict to commit…');
   let verdict: any = null;
-  for (let i = 0; i < 20; i++) {
-    verdict = await client.readContract({
-        address: contractAddress, functionName: 'get_verdict', args: [submissionId],
-    });
-    if (verdict && verdict.exists && verdict.result) break;
-    await new Promise(res => setTimeout(res, 4000));
+  for (let i = 0; i < VERDICT_POLLS; i++) {
+    verdict = await readVerdict(client, contractAddress, submissionId);
+    if (verdict) break;
+    await new Promise(res => setTimeout(res, VERDICT_POLL_MS));
   }
-  if (!verdict || !verdict.exists || !verdict.result) {
-    throw new Error('Verdict not found after consensus — please retry.');
+
+  if (!verdict) {
+    throw new Error(
+      'Consensus is unusually slow right now and the verdict has not committed yet. ' +
+      'Your submission is saved on-chain — open this page again in a few minutes and ' +
+      'the verdict will be waiting.'
+    );
   }
 
   const r = verdict.result;
