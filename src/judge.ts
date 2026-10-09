@@ -46,6 +46,8 @@ export async function runJudge(
   if (!contractAddress) throw new Error('Contract address required');
   if (!contractCode.trim()) throw new Error('Contract code is empty');
 
+  // Account (address string) + provider are bound in getClient(); the SDK
+  // routes signing to the injected wallet because account is an address string.
   const client = getClient(wallet as `0x${string}`) as any;
   const fees = { feeValue: BRADBURY_FEE };
 
@@ -71,7 +73,7 @@ export async function runJudge(
   let agreed = false;
   for (let attempt = 1; attempt <= 5 && !agreed; attempt++) {
     const h = await client.writeContract({
-      address: contractAddress,
+        address: contractAddress,
       functionName: 'analyze',
       args: [submissionId],
       value: 0n,
@@ -93,7 +95,7 @@ export async function runJudge(
   let verdict: any = null;
   for (let i = 0; i < 20; i++) {
     verdict = await client.readContract({
-      address: contractAddress, functionName: 'get_verdict', args: [submissionId],
+        address: contractAddress, functionName: 'get_verdict', args: [submissionId],
     });
     if (verdict && verdict.exists && verdict.result) break;
     await new Promise(res => setTimeout(res, 4000));

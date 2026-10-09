@@ -19,13 +19,27 @@ export const GENLAYER_CHAIN = {
 export const BRADBURY_FEE = '100000000000010352';
 
 let _client: ReturnType<typeof createClient> | null = null;
+let _clientFor = '';
 
 /**
- * Create (once) and return the SDK client bound to Bradbury and the account.
+ * Return the SDK client bound to Bradbury.
+ *
+ * Browser signing pattern (from genlayer-js internals): when `account` is an
+ * ADDRESS STRING (not an account object) and a `provider` (window.ethereum) is
+ * present, the SDK routes eth_sendTransaction/eth_signTransaction to the
+ * injected wallet for signing. So we bind the address string + provider here,
+ * once per connected account. (Passing an account OBJECT instead would mean a
+ * local keypair, which a browser user does not have.)
  */
 export function getClient(account: `0x${string}`) {
-  if (!_client) {
-    _client = createClient({ chain: chains.testnetBradbury, account });
+  const provider = (typeof window !== 'undefined') ? (window as any).ethereum : undefined;
+  if (!_client || _clientFor !== account) {
+    _client = createClient({
+      chain: chains.testnetBradbury,
+      account,
+      ...(provider ? { provider } : {}),
+    });
+    _clientFor = account;
   }
   return _client;
 }
