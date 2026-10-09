@@ -5,8 +5,8 @@ A GenLayer dApp where users submit Python contract code for on-chain LLM-powered
 ## Deployed
 
 - **Network:** GenLayer Bradbury Testnet (chain 4221)
-- **Contract:** `0x144d4d36C5fE65a834871EE9C2900866157B5A78`
-- **Explorer:** https://explorer-bradbury.genlayer.com/address/0x144d4d36C5fE65a834871EE9C2900866157B5A78
+- **Contract:** `0x804B9703821F278caC981BF47b453c3C0b6a0767`
+- **Explorer:** https://explorer-bradbury.genlayer.com/address/0x804B9703821F278caC981BF47b453c3C0b6a0767
 
 > The deployed address is written to `deployed_addresses.json` by the
 > verification script on each run; see "Verification" below.
